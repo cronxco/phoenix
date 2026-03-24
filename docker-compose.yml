@@ -1,0 +1,69 @@
+services:
+  phoenix:
+    build: .
+    container_name: phoenix
+    restart: unless-stopped
+
+    # Tailscale needs /dev/net/tun to create its tunnel interface
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+    # NET_ADMIN is required by tailscaled
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+
+    volumes:
+      # Tailscale state persists across restarts (avoids re-auth)
+      - tailscale_state:/var/lib/tailscale
+      # SSH private key for connecting to Jupiter — mount read-only
+      - /home/your-user/.ssh/phoenix_ed25519:/secrets/id_ed25519:ro
+
+    environment:
+      # ── Tailscale ──────────────────────────────────────────────────────────
+      TS_AUTHKEY: "${TS_AUTHKEY}"                   # Reusable auth key from tailscale.com/settings/keys
+
+      # ── Linode ─────────────────────────────────────────────────────────────
+      LINODE_TOKEN: "${LINODE_TOKEN}"
+      LINODE_INSTANCE_ID: "${LINODE_INSTANCE_ID}"   # Run: linode-cli linodes list
+
+      # ── Jupiter SSH ────────────────────────────────────────────────────────
+      JUPITER_TAILSCALE_HOST: "jupiter"             # MagicDNS name on cronx.net tailnet
+      JUPITER_SSH_USER: "root"
+      JUPITER_SSH_KEY_PATH: "/secrets/id_ed25519"
+      JUPITER_SSH_PORT: "22"
+
+      # ── Komodo ─────────────────────────────────────────────────────────────
+      KOMODO_API_URL: "${KOMODO_API_URL}"           # e.g. https://komodo.cronx.co
+      KOMODO_API_KEY: "${KOMODO_API_KEY}"
+      KOMODO_PROCEDURE_ID: "${KOMODO_PROCEDURE_ID}"
+
+      # ── Notifications ──────────────────────────────────────────────────────
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL}"     # Optional
+      NTFY_TOPIC_URL: "${NTFY_TOPIC_URL}"           # Optional — e.g. https://ntfy.sh/phoenix-cronx
+
+      # ── Webhook auth ───────────────────────────────────────────────────────
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"
+
+      # ── Tuning ─────────────────────────────────────────────────────────────
+      GRACE_PERIOD_MINUTES: "10"
+      POLL_INTERVAL_SECS: "15"
+      WAIT_TIMEOUT_SECS: "600"
+      SWAG_CONTAINER_NAME: "swag"
+
+    # Phoenix only needs to be reachable internally on sol (by Sentry)
+    # Sentry on sol can hit it directly at http://phoenix:8000
+    # No ports exposed publicly — Tailscale handles cross-node comms
+    # Uncomment if you want to expose the health endpoint on sol's localhost:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+
+    networks:
+      - sol_internal                                # Whatever your existing sol network is called
+
+volumes:
+  tailscale_state:
+
+networks:
+  sol_internal:
+    external: true                                  # Use your existing sol Docker network

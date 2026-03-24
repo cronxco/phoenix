@@ -1,6 +1,6 @@
 services:
   phoenix:
-    build: .
+    image: ghcr.io/cronxco/phoenix:latest
     container_name: phoenix
     restart: unless-stopped
 

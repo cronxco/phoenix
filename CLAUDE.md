@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Phoenix is an automated recovery service for the Jupiter VPS. It runs on Sol, listens for Sentry outage webhooks, waits a configurable grace period, then orchestrates a multi-stage recovery: Linode reboot → SSH wait → Docker restart → Komodo procedure → Horizon restart. Notifications go to Slack and/or ntfy at each stage.
+Phoenix is an automated recovery service for the Jupiter VPS. It runs on Sol, listens for Sentry outage webhooks, waits a configurable grace period, then orchestrates a multi-stage recovery: Linode reboot → SSH wait → Docker restart → Komodo action → Horizon restart. Notifications go to Slack and/or ntfy at each stage.
 
 ## Running locally
 
@@ -34,6 +34,6 @@ The app is a FastAPI service run via uvicorn (port 8000). Dependencies are in `r
 
 ## Key environment variables
 
-Required: `LINODE_TOKEN`, `LINODE_INSTANCE_ID`, `KOMODO_API_URL`, `KOMODO_API_KEY`, `KOMODO_PROCEDURE_ID`, `TS_AUTHKEY`
+Required: `LINODE_TOKEN`, `LINODE_INSTANCE_ID`, `KOMODO_API_URL`, `KOMODO_API_KEY`, `KOMODO_API_SECRET`, `KOMODO_ACTION_ID`, `TS_AUTHKEY`
 
 Optional: `WEBHOOK_SECRET`, `SLACK_WEBHOOK_URL`, `NTFY_TOPIC_URL`, `GRACE_PERIOD_MINUTES`, `POLL_INTERVAL_SECS`, `WAIT_TIMEOUT_SECS`, `SWAG_CONTAINER_NAME`

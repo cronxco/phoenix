@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -26,6 +29,7 @@ _state = RecoveryState()
 async def lifespan(app: FastAPI):
     validate_env()
     logger.info("🔥 Phoenix starting up")
+    await Notifier().send("🔥 *Phoenix is online* and listening for Sentry alerts.")
     yield
     logger.info("🔥 Phoenix shutting down")
     if _recovery_task and not _recovery_task.done():
@@ -34,13 +38,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Phoenix", lifespan=lifespan)
 
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+SENTRY_CLIENT_SECRET = os.environ.get("SENTRY_CLIENT_SECRET", "")
 
 
-def _verify_secret(x_sentry_hook_signature: str | None):
-    """Basic token check — Sentry signs webhooks, or we use a shared secret in headers."""
-    if WEBHOOK_SECRET and x_sentry_hook_signature != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+def _verify_signature(body: bytes, header: str | None) -> None:
+    """Verify Sentry's HMAC-SHA256 signature over the raw request body."""
+    if not SENTRY_CLIENT_SECRET:
+        return
+    if not header:
+        raise HTTPException(status_code=401, detail="Missing sentry-hook-signature")
+    expected = hmac.new(SENTRY_CLIENT_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, header):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
 @app.get("/health")
@@ -57,14 +66,15 @@ async def health():
 async def sentry_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    x_sentry_hook_signature: str | None = Header(default=None),
+    sentry_hook_signature: str | None = Header(default=None),
 ):
     global _recovery_task
 
-    _verify_secret(x_sentry_hook_signature)
+    body = await request.body()
+    _verify_signature(body, sentry_hook_signature)
 
     try:
-        payload = await request.json()
+        payload = json.loads(body)
     except Exception:
         logger.warning("Received webhook with invalid JSON body")
         return JSONResponse({"error": "invalid JSON"}, status_code=400)

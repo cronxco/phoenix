@@ -23,7 +23,8 @@ JUPITER_SSH_PORT       = int(os.environ.get("JUPITER_SSH_PORT", "22"))
 
 KOMODO_API_URL         = os.environ.get("KOMODO_API_URL", "")         # e.g. https://komodo.cronx.co
 KOMODO_API_KEY         = os.environ.get("KOMODO_API_KEY", "")
-KOMODO_PROCEDURE_ID    = os.environ.get("KOMODO_PROCEDURE_ID", "")    # ID or name of the procedure
+KOMODO_API_SECRET      = os.environ.get("KOMODO_API_SECRET", "")
+KOMODO_ACTION_ID       = os.environ.get("KOMODO_ACTION_ID", "")       # ID or name of the action
 
 SWAG_CONTAINER_NAME    = os.environ.get("SWAG_CONTAINER_NAME", "swag")
 
@@ -32,7 +33,7 @@ WAIT_TIMEOUT_SECS      = int(os.environ.get("WAIT_TIMEOUT_SECS", "600"))  # 10 m
 
 _REQUIRED_ENV_VARS = [
     "LINODE_TOKEN", "LINODE_INSTANCE_ID",
-    "KOMODO_API_URL", "KOMODO_API_KEY", "KOMODO_PROCEDURE_ID",
+    "KOMODO_API_URL", "KOMODO_API_KEY", "KOMODO_API_SECRET", "KOMODO_ACTION_ID",
 ]
 
 
@@ -128,22 +129,24 @@ class RecoveryOrchestrator:
         await self._notify("🐳 Docker daemon is healthy")
 
     async def _trigger_komodo(self):
-        logger.info(f"Triggering Komodo procedure: {KOMODO_PROCEDURE_ID}")
+        logger.info(f"Triggering Komodo action: {KOMODO_ACTION_ID}")
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{KOMODO_API_URL}/procedure/{KOMODO_PROCEDURE_ID}/run",
+                f"{KOMODO_API_URL}/execute",
                 headers={
-                    "Authorization": f"Bearer {KOMODO_API_KEY}",
+                    "X-Api-Key": KOMODO_API_KEY,
+                    "X-Api-Secret": KOMODO_API_SECRET,
                     "Content-Type": "application/json",
                 },
+                json={"type": "RunAction", "params": {"action": KOMODO_ACTION_ID}},
                 timeout=30,
             )
         if resp.status_code not in (200, 201, 202):
             raise RecoveryStepFailed(
-                f"Komodo procedure returned {resp.status_code}: {resp.text}"
+                f"Komodo action returned {resp.status_code}: {resp.text}"
             )
-        logger.info("Komodo procedure triggered")
-        await self._notify("⚙️ Komodo procedure triggered. Waiting 30s for containers to settle...")
+        logger.info("Komodo action triggered")
+        await self._notify("⚙️ Komodo action triggered. Waiting 30s for containers to settle...")
         await asyncio.sleep(30)
 
     async def _restart_horizon(self):

@@ -17,7 +17,7 @@ services:
       # Tailscale state persists across restarts (avoids re-auth)
       - tailscale_state:/var/lib/tailscale
       # SSH private key for connecting to Jupiter — mount read-only
-      - /home/your-user/.ssh/phoenix_ed25519:/secrets/id_ed25519:ro
+      - /home/will/.ssh/phoenix_ed25519:/secrets/id_ed25519:ro
 
     environment:
       # ── Tailscale ──────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ services:
       NTFY_TOPIC_URL: "${NTFY_TOPIC_URL}"           # Optional — e.g. https://ntfy.sh/phoenix-cronx
 
       # ── Webhook auth ───────────────────────────────────────────────────────
-      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"
+      SENTRY_CLIENT_SECRET: "${SENTRY_CLIENT_SECRET}"
 
       # ── Tuning ─────────────────────────────────────────────────────────────
       GRACE_PERIOD_MINUTES: "10"
@@ -55,15 +55,16 @@ services:
     # Sentry on sol can hit it directly at http://phoenix:8000
     # No ports exposed publicly — Tailscale handles cross-node comms
     # Uncomment if you want to expose the health endpoint on sol's localhost:
-    # ports:
-    #   - "127.0.0.1:8000:8000"
-
+    ports:
+      - "8999:8000"
     networks:
-      - sol_internal                                # Whatever your existing sol network is called
+      sentry-self-hosted_default:
+      phoenix:
 
 volumes:
   tailscale_state:
 
 networks:
-  sol_internal:
-    external: true                                  # Use your existing sol Docker network
+  phoenix:
+  sentry-self-hosted_default:
+    external: true

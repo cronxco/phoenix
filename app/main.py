@@ -48,7 +48,7 @@ def _verify_signature(body: bytes, header: str | None) -> None:
     if not header:
         raise HTTPException(status_code=401, detail="Missing sentry-hook-signature")
     expected = hmac.new(SENTRY_CLIENT_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    logger.info(f"Signature check — expected: {expected!r}, received: {header!r}")
+    logger.info(f"Signature check — secret repr: {SENTRY_CLIENT_SECRET!r}, expected: {expected!r}, received: {header!r}")
     if not hmac.compare_digest(expected, header):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 

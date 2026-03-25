@@ -69,20 +69,31 @@ async def sentry_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     sentry_hook_signature: str | None = Header(default=None),
+    sentry_hook_resource: str | None = Header(default=None),
 ):
     global _recovery_task
 
     body = await request.body()
     _verify_signature(body, sentry_hook_signature)
 
+    # Ignore Sentry test pings and non-alert resources (e.g. installation handshake)
+    if sentry_hook_resource and sentry_hook_resource not in ("metric_alert", "event_alert"):
+        logger.info(f"Ignoring non-alert Sentry webhook (resource={sentry_hook_resource})")
+        return JSONResponse({"status": "ignored", "resource": sentry_hook_resource})
+
     try:
         payload = json.loads(body)
     except Exception:
         logger.warning("Received webhook with invalid JSON body")
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
-    logger.info(f"Received Sentry webhook: action={payload.get('action')}")
 
     action = payload.get("action")
+    logger.info(f"Received Sentry webhook: action={action}, resource={sentry_hook_resource}")
+
+    # Sentry sends action="test" for some test notification types
+    if action == "test":
+        logger.info("Ignoring Sentry test notification")
+        return JSONResponse({"status": "ignored", "action": "test"})
 
     # Sentry alert resolved — cancel any pending recovery
     if action == "resolved":

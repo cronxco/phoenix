@@ -62,6 +62,7 @@ class RecoveryOrchestrator:
             await self._stage("waiting_for_ssh", self._wait_for_ssh())
             await self._stage("restarting_docker", self._restart_docker())
             await self._stage("waiting_for_docker", self._wait_for_docker())
+            await self._stage("waiting_for_komodo", self._wait_for_komodo())
             await self._stage("triggering_komodo", self._trigger_komodo())
             await self._stage("restarting_horizon", self._restart_horizon())
 
@@ -127,6 +128,15 @@ class RecoveryOrchestrator:
             failure_msg="Docker daemon did not become healthy within timeout",
         )
         await self._notify("🐳 Docker daemon is healthy")
+
+    async def _wait_for_komodo(self):
+        logger.info(f"Polling Komodo API at {KOMODO_API_URL}...")
+        await self._poll_until(
+            self._komodo_reachable,
+            label="Komodo API reachable",
+            failure_msg="Komodo API did not become reachable within timeout",
+        )
+        await self._notify("⚙️ Komodo is reachable")
 
     async def _trigger_komodo(self):
         logger.info(f"Triggering Komodo action: {KOMODO_ACTION_ID}")
@@ -213,6 +223,14 @@ class RecoveryOrchestrator:
             ):
                 return True
         except OSError:
+            return False
+
+    def _komodo_reachable(self) -> bool:
+        try:
+            import urllib.request
+            urllib.request.urlopen(KOMODO_API_URL, timeout=5)
+            return True
+        except Exception:
             return False
 
     def _docker_healthy(self) -> bool:

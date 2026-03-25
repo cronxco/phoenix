@@ -102,6 +102,11 @@ async def sentry_webhook(
             logger.info("Recovery already scheduled — ignoring duplicate webhook")
             return JSONResponse({"status": "recovery already pending"})
 
+        cooldown_minutes = int(os.environ.get("COOLDOWN_MINUTES", "30"))
+        if _state.in_cooldown(cooldown_minutes):
+            logger.info(f"In cooldown period ({cooldown_minutes}m) — ignoring webhook")
+            return JSONResponse({"status": "cooldown"})
+
         logger.info("Outage detected — starting 10-minute grace period")
         _state.set_triggered()
 

@@ -8,6 +8,7 @@ class RecoveryState:
     is_active: bool = False
     stage: str = "idle"
     last_trigger: Optional[datetime] = None
+    last_recovery_end: Optional[datetime] = None
 
     def set_triggered(self):
         self.is_active = True
@@ -20,3 +21,10 @@ class RecoveryState:
     def clear(self):
         self.is_active = False
         self.stage = "idle"
+        self.last_recovery_end = datetime.now(timezone.utc)
+
+    def in_cooldown(self, cooldown_minutes: int) -> bool:
+        if self.last_recovery_end is None:
+            return False
+        elapsed = (datetime.now(timezone.utc) - self.last_recovery_end).total_seconds()
+        return elapsed < cooldown_minutes * 60

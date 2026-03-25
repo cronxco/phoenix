@@ -90,24 +90,20 @@ async def sentry_webhook(
             logger.info("Outage resolved by Sentry — cancelling recovery countdown")
             _recovery_task.cancel()
             _state.clear()
-            notifier = Notifier()
-            await notifier.send("✅ *Phoenix*: Outage resolved by Sentry before recovery triggered. No action taken.")
+            background_tasks.add_task(
+                Notifier().send,
+                "✅ *Phoenix*: Outage resolved by Sentry before recovery triggered. No action taken.",
+            )
         return JSONResponse({"status": "resolved, recovery cancelled"})
 
-    # Sentry alert triggered
-    if action == "triggered":
+    # Sentry alert triggered (metric alerts use "triggered", issue alerts use "created")
+    if action in ("triggered", "created"):
         if _recovery_task and not _recovery_task.done():
             logger.info("Recovery already scheduled — ignoring duplicate webhook")
             return JSONResponse({"status": "recovery already pending"})
 
         logger.info("Outage detected — starting 10-minute grace period")
         _state.set_triggered()
-
-        notifier = Notifier()
-        await notifier.send(
-            "⚠️ *Phoenix*: Sentry outage alert received for Jupiter/Spark. "
-            "Recovery will trigger in 10 minutes if not resolved."
-        )
 
         orchestrator = RecoveryOrchestrator(state=_state)
         _recovery_task = asyncio.create_task(
@@ -122,6 +118,10 @@ async def sentry_webhook(
 async def _grace_then_recover(orchestrator: RecoveryOrchestrator):
     grace_minutes = int(os.environ.get("GRACE_PERIOD_MINUTES", "10"))
     try:
+        await Notifier().send(
+            "⚠️ *Phoenix*: Sentry outage alert received for Jupiter/Spark. "
+            "Recovery will trigger in 10 minutes if not resolved."
+        )
         logger.info(f"Grace period: waiting {grace_minutes} minutes...")
         await asyncio.sleep(grace_minutes * 60)
         logger.info("Grace period elapsed — beginning recovery")

@@ -42,13 +42,14 @@ SENTRY_CLIENT_SECRET = os.environ.get("SENTRY_CLIENT_SECRET", "")
 
 
 def _verify_signature(body: bytes, header: str | None) -> None:
-    """Verify Sentry's HMAC-SHA256 signature over the raw request body."""
+    """Verify Sentry's HMAC-SHA256 signature over the JSON-serialized request body."""
     if not SENTRY_CLIENT_SECRET:
         return
     if not header:
         raise HTTPException(status_code=401, detail="Missing sentry-hook-signature")
-    expected = hmac.new(SENTRY_CLIENT_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    logger.info(f"Signature check — secret repr: {SENTRY_CLIENT_SECRET!r}, expected: {expected!r}, received: {header!r}")
+    # Sentry signs JSON.stringify(request.body), not the raw bytes
+    normalized = json.dumps(json.loads(body), separators=(",", ":"))
+    expected = hmac.new(SENTRY_CLIENT_SECRET.encode(), normalized.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, header):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 

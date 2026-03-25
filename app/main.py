@@ -77,7 +77,7 @@ async def sentry_webhook(
     _verify_signature(body, sentry_hook_signature)
 
     # Ignore Sentry test pings and non-alert resources (e.g. installation handshake)
-    if sentry_hook_resource and sentry_hook_resource not in ("metric_alert", "event_alert"):
+    if sentry_hook_resource and sentry_hook_resource not in ("metric_alert", "event_alert", "issue"):
         logger.info(f"Ignoring non-alert Sentry webhook (resource={sentry_hook_resource})")
         return JSONResponse({"status": "ignored", "resource": sentry_hook_resource})
 

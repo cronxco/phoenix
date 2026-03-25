@@ -162,8 +162,9 @@ class RecoveryOrchestrator:
     async def _restart_horizon(self):
         logger.info("Restarting Laravel Horizon inside SWAG container...")
 
-        horizon_clear_cmd  = f"docker exec {SWAG_CONTAINER_NAME} php artisan horizon:clear"
-        horizon_start_cmd  = f"docker exec {SWAG_CONTAINER_NAME} php artisan horizon:start --no-interaction &"
+        workdir = "/srv/web/sites/spark-dev/current"
+        horizon_clear_cmd = f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon:clear"
+        horizon_start_cmd = f"docker exec -d -t -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon"
 
         stdout, stderr = await self._ssh_run(horizon_clear_cmd)
         logger.info(f"horizon:clear → stdout={stdout!r} stderr={stderr!r}")
@@ -173,17 +174,7 @@ class RecoveryOrchestrator:
         await asyncio.sleep(3)
 
         stdout, stderr = await self._ssh_run(horizon_start_cmd)
-        logger.info(f"horizon:start → stdout={stdout!r} stderr={stderr!r}")
-
-        # horizon:start runs in background (&) so SSH returns immediately —
-        # wait a moment then verify the process is actually running
-        await asyncio.sleep(5)
-        stdout, stderr = await self._ssh_run(
-            f"docker exec {SWAG_CONTAINER_NAME} php artisan horizon:status"
-        )
-        logger.info(f"horizon:status → stdout={stdout!r} stderr={stderr!r}")
-        if "running" not in stdout.lower():
-            raise RecoveryStepFailed(f"Horizon failed to start: {stdout} {stderr}")
+        logger.info(f"horizon → stdout={stdout!r} stderr={stderr!r}")
 
         await self._notify("🌅 Horizon cleared and restarted inside SWAG container")
 

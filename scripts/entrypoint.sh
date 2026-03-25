@@ -21,5 +21,4 @@ echo "Tailscale up — hostname: $(tailscale status --json | python3 -c 'import 
 exec uvicorn app.main:app \
   --host 0.0.0.0 \
   --port 8000 \
-  --log-level info \
-  --no-access-log
+  --log-level info

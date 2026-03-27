@@ -60,10 +60,17 @@ class RecoveryOrchestrator:
 
             await self._stage("restarting_linode", self._restart_linode())
             await self._stage("waiting_for_ssh", self._wait_for_ssh())
-            await self._stage("restarting_docker", self._restart_docker())
             await self._stage("waiting_for_docker", self._wait_for_docker())
-            await self._stage("waiting_for_komodo", self._wait_for_komodo())
-            await self._stage("triggering_komodo", self._trigger_komodo())
+
+            containers_healthy = await self._stage_returning(
+                "checking_containers", self._check_containers()
+            )
+            if not containers_healthy:
+                await self._stage("restarting_docker", self._restart_docker())
+                await self._stage("waiting_for_docker", self._wait_for_docker())
+                await self._stage("waiting_for_komodo", self._wait_for_komodo())
+                await self._stage("triggering_komodo", self._trigger_komodo())
+
             await self._stage("restarting_horizon", self._restart_horizon())
 
             self.state.set_stage("complete")
@@ -112,6 +119,54 @@ class RecoveryOrchestrator:
             failure_msg="Jupiter SSH did not become available within timeout",
         )
         await self._notify(f"🟢 Jupiter SSH is up ({JUPITER_TAILSCALE_HOST})")
+
+    async def _check_containers(self) -> bool:
+        """Poll until swag and redis-spark are both Up, or one is definitively stuck.
+
+        Returns True if both containers are healthy (skip restart path).
+        Returns False if one or more are stuck (trigger restart path).
+        """
+        targets = {"swag", "redis-spark"}
+        cmd = (
+            'docker ps -a --format "{{.Names}}\\t{{.Status}}"'
+            ' --filter "name=swag" --filter "name=redis-spark"'
+        )
+        deadline = time.monotonic() + WAIT_TIMEOUT_SECS
+        while time.monotonic() < deadline:
+            stdout, _ = await self._ssh_run(cmd)
+            statuses: dict[str, str] = {}
+            for line in stdout.splitlines():
+                parts = line.split("\t", 1)
+                if len(parts) == 2:
+                    statuses[parts[0].strip()] = parts[1].strip()
+
+            logger.info(f"Container statuses: {statuses}")
+
+            stuck = {
+                name: status
+                for name, status in statuses.items()
+                if status.startswith("Restarting") or status.startswith("Exited")
+            }
+            if stuck:
+                details = ", ".join(f"{n} ({s})" for n, s in stuck.items())
+                await self._notify(
+                    f"⚠️ Container(s) stuck: {details}. Restarting Docker and triggering Komodo..."
+                )
+                return False
+
+            healthy = {name for name, status in statuses.items() if status.startswith("Up")}
+            if targets <= healthy:
+                await self._notify("✅ swag and redis-spark are running — skipping Docker restart and Komodo.")
+                return True
+
+            missing = targets - set(statuses.keys())
+            starting = targets - healthy - missing
+            logger.info(f"  … waiting for containers (healthy={healthy}, starting={starting}, missing={missing})")
+            await asyncio.sleep(POLL_INTERVAL_SECS)
+
+        # Timeout: treat as stuck
+        await self._notify("⚠️ Container check timed out — assuming stuck. Restarting Docker and triggering Komodo...")
+        return False
 
     async def _restart_docker(self):
         logger.info("Restarting Docker on Jupiter via SSH...")
@@ -163,20 +218,50 @@ class RecoveryOrchestrator:
         logger.info("Restarting Laravel Horizon inside SWAG container...")
 
         workdir = "/srv/web/sites/spark-dev/current"
-        horizon_clear_cmd = f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon:clear"
-        horizon_start_cmd = f"docker exec -d -t -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon"
 
-        stdout, stderr = await self._ssh_run(horizon_clear_cmd)
-        logger.info(f"horizon:clear → stdout={stdout!r} stderr={stderr!r}")
+        # Step 1: clear queued jobs
+        stdout, stderr = await self._ssh_run(
+            f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon:clear"
+        )
+        logger.info(f"horizon:clear → {stdout!r}")
         if stderr and "error" in stderr.lower():
             raise RecoveryStepFailed(f"horizon:clear failed: {stderr}")
 
         await asyncio.sleep(3)
 
-        stdout, stderr = await self._ssh_run(horizon_start_cmd)
-        logger.info(f"horizon → stdout={stdout!r} stderr={stderr!r}")
+        # Step 2: start Horizon detached
+        stdout, stderr = await self._ssh_run(
+            f"docker exec -d -t -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon"
+        )
+        logger.info(f"horizon start → stdout={stdout!r} stderr={stderr!r}")
 
-        await self._notify("🌅 Horizon cleared and restarted inside SWAG container")
+        # Step 3: check for stuck schedule mutexes
+        stdout, _ = await self._ssh_run(
+            f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan schedule:list"
+        )
+        if "Has Mutex" in stdout:
+            logger.info("Found stuck mutexes — running schedule:clear-cache")
+            clear_out, _ = await self._ssh_run(
+                f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan schedule:clear-cache"
+            )
+            logger.info(f"schedule:clear-cache → {clear_out!r}")
+        else:
+            logger.info("No stuck mutexes — skipping schedule:clear-cache")
+
+        # Step 4: verify Horizon is running
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            stdout, _ = await self._ssh_run(
+                f"docker exec -w {workdir} {SWAG_CONTAINER_NAME} php artisan horizon:status"
+            )
+            logger.info(f"horizon:status → {stdout!r}")
+            if "Horizon is running" in stdout:
+                break
+            await asyncio.sleep(5)
+        else:
+            raise RecoveryStepFailed("Horizon did not start within timeout")
+
+        await self._notify("🌅 Horizon cleared and restarted — status confirmed running.")
 
     # ── SSH helpers ────────────────────────────────────────────────────────────
 
@@ -251,6 +336,11 @@ class RecoveryOrchestrator:
         logger.info(f"─── Stage: {name} ───")
         self.state.set_stage(name)
         await coro
+
+    async def _stage_returning(self, name: str, coro):
+        logger.info(f"─── Stage: {name} ───")
+        self.state.set_stage(name)
+        return await coro
 
     async def _notify(self, msg: str):
         logger.info(f"[notify] {msg}")

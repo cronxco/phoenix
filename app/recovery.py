@@ -121,15 +121,19 @@ class RecoveryOrchestrator:
         await self._notify(f"🟢 Jupiter SSH is up ({JUPITER_TAILSCALE_HOST})")
 
     async def _check_containers(self) -> bool:
-        """Poll until swag and redis-spark are both Up, or one is definitively stuck.
+        """Poll until all expected containers are Up, or one is definitively stuck.
 
-        Returns True if both containers are healthy (skip restart path).
+        Returns True if all containers are healthy (skip restart path).
         Returns False if one or more are stuck (trigger restart path).
         """
-        targets = {"swag", "redis-spark"}
+        targets = {
+            "swag", "redis-spark",
+            "outline-redis-1", "outline-nginx-1", "outline-outline-1",
+            "outline-minio-1", "outline-postgres-1",
+        }
         cmd = (
             'docker ps -a --format "{{.Names}}\\t{{.Status}}"'
-            ' --filter "name=swag" --filter "name=redis-spark"'
+            ' --filter "name=swag" --filter "name=redis-spark" --filter "name=outline"'
         )
         deadline = time.monotonic() + WAIT_TIMEOUT_SECS
         while time.monotonic() < deadline:
@@ -156,7 +160,7 @@ class RecoveryOrchestrator:
 
             healthy = {name for name, status in statuses.items() if status.startswith("Up")}
             if targets <= healthy:
-                await self._notify("✅ swag and redis-spark are running — skipping Docker restart and Komodo.")
+                await self._notify("✅ All containers are running — skipping Docker restart and Komodo.")
                 return True
 
             missing = targets - set(statuses.keys())
